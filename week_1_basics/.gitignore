@@ -1,0 +1,4 @@
+ny_taxi_data/
+*.csv
+*.csv.gz
+__pycache__/
