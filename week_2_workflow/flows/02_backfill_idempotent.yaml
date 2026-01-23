@@ -1,0 +1,43 @@
+id: 02_backfill_idempotent
+namespace: zoomcamp
+
+triggers:
+  - id: green_schedule
+    type: io.kestra.plugin.core.trigger.Schedule
+    cron: "0 9 1 * *"
+
+tasks:
+  - id: purge_data
+    type: io.kestra.plugin.jdbc.postgresql.Query
+    url: jdbc:postgresql://postgres:5432/ny_taxi
+    username: root
+    password: root
+    sql: |
+      DELETE FROM yellow_taxi_data 
+      WHERE tpep_pickup_datetime >= '{{ trigger.date | date("yyyy-MM-01") }}'::timestamp 
+      AND tpep_pickup_datetime < '{{ trigger.date | date("yyyy-MM-01") }}'::timestamp + INTERVAL '1 month';
+
+  - id: download_file
+    type: io.kestra.plugin.core.http.Download
+    uri: "https://github.com/DataTalksClub/nyc-tlc-data/releases/download/yellow/yellow_tripdata_{{ trigger.date | date('yyyy') }}-{{ trigger.date | date('MM') }}.csv.gz"
+
+  - id: unzip_file
+    type: io.kestra.plugin.scripts.shell.Commands
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process
+    inputFiles:
+      data.gz: "{{ outputs.download_file.uri }}"
+    outputFiles:
+      - final.csv
+    commands:
+      - gunzip -c data.gz > final.csv
+
+  - id: ingest_to_postgres
+    type: io.kestra.plugin.jdbc.postgresql.CopyIn
+    url: jdbc:postgresql://postgres:5432/ny_taxi
+    username: root
+    password: root
+    table: yellow_taxi_data
+    format: CSV
+    header: true
+    from: "{{ outputs.unzip_file.outputFiles['final.csv'] }}"
